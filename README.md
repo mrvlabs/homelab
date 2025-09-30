@@ -2,4 +2,4 @@
 Lab in a Box
 
 ## Project
-See Issues and Project
+See Issues and Project.  
