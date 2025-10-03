@@ -1,0 +1,12 @@
+project_name: aws-test-tig_mrv
+region: eu-west-1
+az: eu-west-1a
+vpc_cidr: 10.42.0.0/16
+public_subnet_cidr: 10.42.10.0/24
+
+allow_ssh: false
+ssh_cidr: "0.0.0.0/0"
+
+instace_type: t3.micro
+key_name: ""
+ami_id: ""

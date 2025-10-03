@@ -1,0 +1,38 @@
+---
+- name: Create VPC and EC2 instance (with SSM connectivity)
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  
+  collections:
+    - amazon.aws
+  
+  tasks:
+    - name: Ensure AWS collection pre-requisites are available
+      ansible.builtin.debug:
+        msg: "Using amazon.aws collection"
+    
+    - name: Get lastest Amazon Linux 2023
+      ec2_ami_info:
+        region: "{{ region }}"
+        owners: ["amazon"]
+        filters:
+          name: "al2023-ami-*-x86_64"
+          architecture: "x86_64"
+          state: "available"
+      when: ami_id | length == 0
+      register: ami_info
+    
+    - name: Choose most recent AMI
+      set_fact:
+        effective_ami_id: "{{ (ami_info.images | sort(attribute='creation_date')) | last | default({}) | dict2items | selectattr('key', 'equalto', 'image_id') | map(attribute='value') | first }}"
+      when: ami_id | length == 0
+    
+    - name: Use provided AMI (if given)
+      set_fact:
+        effective_ami_id: "{{ ami_id }}"
+      when: ami_id | length > 0
+    
+    - name: Create VPC
+      ec2_vpc_net:
