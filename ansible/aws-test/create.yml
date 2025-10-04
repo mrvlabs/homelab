@@ -36,3 +36,134 @@
     
     - name: Create VPC
       ec2_vpc_net:
+        name: "{{ project_name }}-vpc"
+        cidr_block: "{{ vpc_cidr }}"
+        dns_support: true
+        dns_hostname: true
+        region: "{{ region }}"
+        state: present
+        tags:
+          Project: "{{ project_name }}"
+      register: vpc
+    
+    - name: Create Internet Gateway and attach
+      ec2_vpc_igw:
+        vpc_id: "{{ vpc.vpc.id }}" 
+        state: present
+        region: "{{ region }}"
+        tags:
+          Name: "{{ project_name }}-igw"
+          Project: "{{ project_name }}"
+      register: igw
+    
+    - name: Create a public subnet
+      ec2_vpc_subnets:
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: "{{ public_subnet_cidr }}"
+        az: "{{ az }}"
+        map_public: true
+        state: present
+        region: "{{ region }}"
+        tags:
+          Name: "{{ project_name }}-public-a"
+          Project: "{{ project_name }}"
+      register public_subnet
+    
+    - name: Create route table for public subnet with default route to IGW
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ region }}"
+        state: present
+        tags:
+          Name: "{{ project_name }}-public-rt"
+          Project: "{{ project_name }}"
+        subnets:
+          - "{{ public_subnet.subnet.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw.gateway_id }}"
+      register public_rt
+    
+    - name: Create security group (egress all, optional SSH ingress)
+      ec2_security_group:
+        name: "{{ project_name }}-sg"
+        description: "Secrurity group for {{ project_name }} instance"
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ region }}"
+        state: present
+        tags:
+          Project: "{{ project_name }}"
+        rules:
+          - proto: tcp
+            ports: 22
+            cidr_ip: "{{ ssh_cidr }}"
+            rule_desc: "SSH"
+            when: "{{ allow_ssh | bool }}"
+        rules_egress:
+          - proto: "-1"
+            from_port: 0
+            to_port: 0
+            cidr_ip: "0.0.0.0/0"
+      register: sg_created
+  
+    - name: Create key pair
+      ec2_key:
+        name: "{{ key_name }}"
+        region: "{{ region }}"
+        state: present
+      register: keypair
+      when: key_name | length > 0
+    
+    - name: Save private key locally on first create
+      copy:
+        content: "{{ keypair.keypair.private_key }}"
+        dest: "./{{ key_name }}.pem"
+        mode: "0600"
+      when: key_name | length > 0 and keypair.changed | default(false)
+    
+    - name: Create IAM role for EC2 with SSM Access
+      iam_role:
+        name: "{{ project_name }}-ec2-ssm-role"
+        assume_role_policy_document: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": { "Service": "ec2.amazonaws.com" },
+              "Action": "sts:AssumeRole"
+            }]
+          }
+        state: present
+      register: iam_role_result
+    
+    - name: Attach AmazonSSMManagedInstanceCore policy
+      iam_managed_policy:
+        policy_arn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        state: present
+        iam_type: role
+        iam_name: "{{ project_name }}-ec2-ssm-role"
+    
+    - name: Create / ensure instance profile exists and has the role
+      iam_instance_profile:
+        name: "{{ project_name }}-ec2-ssm-profile"
+        state: present
+        roles:
+          - "{{ project_name }}-ec2-ssm-role"
+    
+    - name: Launch EC2 instance
+      ec2_instance:
+        name: "{{ project_name }}-instance"
+        region: "{{ region }}"
+        key_name: "{{ (key_name | length > 0) | ternary(key_name, omit) }}"
+        instance_type: "{{ instance_type }}"
+        image_id: "{{ effective_ami_id }}"
+        network:
+          assign_public_ip: true
+          subnet_id: "{{ public_subnet.subnet.id }}"
+          security_group_id: "{{ sg_created.group_id if sg_created.group_id is defined else sg_created.group_id | default(sg_created.group_id) }}"
+        iam_instance_profile: "{{ project_name }}-ec2-ssm-profile"
+        wait: true
+        tags:
+          Project: "{{ project_name }}"
+          Name: "{{ project_name }}-instance"
+      register: ec2
