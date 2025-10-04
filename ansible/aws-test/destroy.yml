@@ -13,7 +13,7 @@
       ec2_instance_info:
         region: "{{ region }}"
         filters:
-          "tag:Project": "{{ proeject_name }}"
+          "tag:Project": "{{ project_name }}"
           instance-state-name: ["pending","running", "stopping","stopped"]
       register: ec2_info
     
@@ -96,7 +96,7 @@
       when: vpc_id is defined
 
     - name: Delete subnet
-      ec2_vpc_subet:
+      ec2_vpc_subnet:
         region: "{{ region }}"
         state: absent
         vpc_id: "{{ vpc_id }}"

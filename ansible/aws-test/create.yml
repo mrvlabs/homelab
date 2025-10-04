@@ -57,7 +57,7 @@
       register: igw
     
     - name: Create a public subnet
-      ec2_vpc_subnets:
+      ec2_vpc_subnet:
         vpc_id: "{{ vpc.vpc.id }}"
         cidr: "{{ public_subnet_cidr }}"
         az: "{{ az }}"
@@ -67,7 +67,7 @@
         tags:
           Name: "{{ project_name }}-public-a"
           Project: "{{ project_name }}"
-      register public_subnet
+      register: public_subnet
     
     - name: Create route table for public subnet with default route to IGW
       ec2_vpc_route_table:
@@ -82,7 +82,7 @@
         routes:
           - dest: 0.0.0.0/0
             gateway_id: "{{ igw.gateway_id }}"
-      register public_rt
+      register: public_rt
     
     - name: Create security group (egress all, optional SSH ingress)
       ec2_security_group:
