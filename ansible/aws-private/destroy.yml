@@ -1,0 +1,147 @@
+---
+- name: Destroy all private stack resources
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  collections:
+    - amazon.aws
+
+  tasks:
+    - name: Find instances by tag
+      ec2_instance_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Project": "{{ project_name }}"
+          instance-state-name: ["pending","running","stopping","stopped"]
+      register: ec2_info
+
+    - name: Terminate instance(s)
+      ec2_instance:
+        region: "{{ region }}"
+        instance_ids: "{{ ec2_info.instances | map(attribute='instance_id') | list }}"
+        state: absent
+        wait: true
+      when: ec2_info.instances | length > 0
+
+    - name: IAM | Remove instance profile
+      iam_instance_profile:
+        name: "{{ project_name }}-ec2-ssm-profile"
+        state: absent
+
+    - name: IAM | Detach SSM policy
+      iam_managed_policy:
+        policy_arn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        state: absent
+        iam_type: role
+        iam_name: "{{ project_name }}-ec2-ssm-role"
+      ignore_errors: true
+
+    - name: IAM | Delete role
+      iam_role:
+        name: "{{ project_name }}-ec2-ssm-role"
+        state: absent
+      ignore_errors: true
+
+    - name: VPC | Lookup by tag
+      ec2_vpc_net_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Project": "{{ project_name }}"
+      register: vpcs
+
+    - name: Set vpc_id fact
+      set_fact:
+        vpc_id: "{{ (vpcs.vpcs | first).vpc_id }}"
+      when: vpcs.vpcs | length > 0
+
+    # Delete VPC endpoints first (interface and gateway)
+    - name: VPCE | Find endpoints by tag
+      ec2_vpc_endpoint_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Project": "{{ project_name }}"
+      when: vpc_id is defined
+      register: vpce_info
+
+    - name: VPCE | Delete endpoints
+      ec2_vpc_endpoint:
+        region: "{{ region }}"
+        vpc_endpoint_id: "{{ item.vpc_endpoint_id }}"
+        state: absent
+      loop: "{{ vpce_info.vpc_endpoints | default([]) }}"
+      when: vpce_info is defined
+
+    - name: Route table | Find private RT
+      ec2_vpc_route_table_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Name": "{{ project_name }}-private-rt"
+      register: rt_info
+      when: vpc_id is defined
+
+    - name: Route table | Delete
+      ec2_vpc_route_table:
+        region: "{{ region }}"
+        route_table_id: "{{ (rt_info.route_tables | first).id }}"
+        state: absent
+      when: rt_info.route_tables | length > 0
+
+    - name: Subnet | Find private subnet
+      ec2_vpc_subnet_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Name": "{{ project_name }}-private-a"
+      register: subnet_info
+      when: vpc_id is defined
+
+    - name: Subnet | Delete
+      ec2_vpc_subnet:
+        region: "{{ region }}"
+        state: absent
+        vpc_id: "{{ vpc_id }}"
+        cidr: "{{ private_subnet_cidr }}"
+      when: subnet_info.subnets | length > 0
+
+    - name: SG | Find endpoint SG
+      ec2_group_info:
+        region: "{{ region }}"
+        filters:
+          vpc-id: "{{ vpc_id }}"
+          group-name: "{{ project_name }}-sg-vpce"
+      register: sg_vpce_info
+      when: vpc_id is defined
+
+    - name: SG | Delete endpoint SG
+      ec2_security_group:
+        region: "{{ region }}"
+        state: absent
+        group_id: "{{ (sg_vpce_info.security_groups | first).group_id }}"
+      when: sg_vpce_info.security_groups | length > 0
+
+    - name: SG | Find instance SG
+      ec2_group_info:
+        region: "{{ region }}"
+        filters:
+          vpc-id: "{{ vpc_id }}"
+          group-name: "{{ project_name }}-sg-instance"
+      register: sg_instance_info
+      when: vpc_id is defined
+
+    - name: SG | Delete instance SG
+      ec2_security_group:
+        region: "{{ region }}"
+        state: absent
+        group_id: "{{ (sg_instance_info.security_groups | first).group_id }}"
+      when: sg_instance_info.security_groups | length > 0
+
+    - name: VPC | Delete
+      ec2_vpc_net:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        state: absent
+      when: vpc_id is defined
+
+    - name: Final message
+      ansible.builtin.debug:
+        msg: "All private resources for {{ project_name }} removed (where present)."
