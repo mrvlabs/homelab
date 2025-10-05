@@ -1,7 +1,7 @@
 # Name & region
-project_name: demo-vpc-private
-region: eu-west-2           # London
-az: eu-west-2a
+project_name: aws-colo-test-mrv
+region: eu-west-1
+az: eu-west-1a
 
 # Networking (private only)
 vpc_cidr: 10.42.0.0/16
@@ -9,7 +9,7 @@ private_subnet_cidr: 10.42.11.0/24
 
 # EC2
 instance_type: t3.micro
-ami_id: ""                  # leave blank to auto-pick latest AL2023 x86_64
+ami_id: ""
 
 # Endpoints (keep true for a no-internet, SSM-only setup)
 enable_vpc_endpoints: true
